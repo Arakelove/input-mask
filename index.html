@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="./style.css">
+    <title>Input Mask Demo</title>
+</head>
+<body>
+    <div class="card">
+        <h1>Input mask playground</h1>
+        <p>Введите данные по шаблонам, маска автоматически отформатирует ввод и вставит разделители.</p>
+        <div class="grid">
+            <div>
+                
+                <label for="holder">Holder</label>
+                <input id="holder" type="text" placeholder="Иван Иванов">
+                <div class="hint">[[A{+}|A{+}[[-| ]]A{+}|A.]]</div>
+            </div>
+            <div>
+                <label for="number">Card number</label>
+                <input id="number" type="text" inputmode="numeric" autocomplete="cc-number" placeholder="0000 0000 0000 0000">
+                <div class="hint">0000: :0000: :0000: :0000</div>
+            </div>
+            <div>
+                <label for="date">Date</label>
+                <input id="date" type="text" inputmode="numeric" placeholder="ДД.ММ.ГГГГ">
+                <div class="hint">00:.:00:.:0000</div>
+            </div>
+            <div>
+                <label for="cvv">CVV</label>
+                <input id="cvv" type="text" inputmode="numeric" autocomplete="cc-csc" placeholder="123">
+                <div class="hint">[[000|0000]]</div>
+            </div>
+            <div>
+                <label for="name">Name (with dash)</label>
+                <input id="name" type="text" placeholder="Anna-Maria">
+                <div class="hint">[[A{+}|A{+}-A{+}]]</div>
+            </div>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+    <script>
+        const patterns = {
+            holder: '[[A{+}|A{+}[[-| ]]A{+}|A.]]',
+            number: '0000: :0000: :0000: :0000',
+            date: '00:.:00:.:0000',
+            cvv: '[[000|0000]]',
+            name: '[[A{+}|A{+}-A{+}]]',
+        };
+
+
+
+        function bindInput(id, pattern) {
+            const input = document.getElementById(id);
+            if (!input) return;
+
+            const formatter = Mask.create(pattern);
+            const { separators } = splitBySeparators(pattern);
+            let lastValid = '';
+
+            input.addEventListener('input', () => {
+                const cursor = input.selectionStart || 0;
+                const rawValue = input.value;
+                const dataBeforeCursor = removeSeparators(rawValue.slice(0, cursor), separators).length;
+
+                try {
+                    const formatted = formatter.format(rawValue);
+                    input.value = formatted;
+                    const nextCursor = findCursorPosition(formatted, separators, dataBeforeCursor);
+                    input.setSelectionRange(nextCursor, nextCursor);
+                    lastValid = formatted;
+                } catch (err) {
+                    console.error(err);
+                    input.value = lastValid;
+                    input.setSelectionRange(lastValid.length, lastValid.length);
+                }
+            });
+        }
+
+        function findCursorPosition(formatted, separators, dataCount) {
+            let dataSeen = 0;
+            let i = 0;
+
+            while (i < formatted.length) {
+                const found = separators.find(sep => sep && formatted.startsWith(sep, i));
+                if (found) {
+                    i += found.length;
+                    continue;
+                }
+
+                if (dataSeen === dataCount) {
+                    return i;
+                }
+                dataSeen += 1;
+                i += 1;
+            }
+
+            return formatted.length;
+        }
+
+        bindInput('holder', patterns.holder);
+        bindInput('number', patterns.number);
+        bindInput('date', patterns.date);
+        bindInput('cvv', patterns.cvv);
+        bindInput('name', patterns.name);
+    </script>
+
+</body>
+</html>
