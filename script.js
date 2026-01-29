@@ -12,7 +12,7 @@ const Mask = {
     return {
       format(value) {
         const source = value == null ? '' : String(value);
-        return formatValue(parsed, source);
+        return formatValue(parsed, source).masked;
       },
     };
   },
@@ -64,6 +64,10 @@ function splitBySeparators(pattern) {
         throw new MaskError('Separator must be closed with ":"');
       }
       const sep = pattern.slice(i + 1, end);
+      if (current.length === 0) {
+        logError('Empty fragment before separator');
+        throw new MaskError('Empty fragment before separator');
+      }
       fragments.push(current);
       separators.push(sep);
       current = '';
@@ -84,6 +88,11 @@ function splitBySeparators(pattern) {
     throw new MaskError('Unclosed group "[["');
   }
 
+  if (current.length === 0) {
+    logError('Empty fragment at end of pattern');
+    throw new MaskError('Empty fragment at end of pattern');
+  }
+
   fragments.push(current);
 
   return { fragments, separators };
@@ -100,7 +109,6 @@ function parseFragment(fragment) {
     if (ch === '[' && next === '[') {
       i += 2;
       const groupNode = parseGroup();
-      // Quantifier after group is not allowed.
       if (fragment[i] === '{') {
         logError('Quantifiers cannot be applied to groups');
         throw new MaskError('Quantifiers cannot be applied to groups');
@@ -154,6 +162,10 @@ function parseFragment(fragment) {
       }
 
       if (currentChar === '|' && i < fragment.length) {
+        if (current.length === 0) {
+          logError('Empty alternative in group');
+          throw new MaskError('Empty alternative in group');
+        }
         alternatives.push(current);
         current = [];
         i += 1;
@@ -161,6 +173,10 @@ function parseFragment(fragment) {
       }
 
       if (currentChar === ']' && lookahead === ']') {
+        if (current.length === 0) {
+          logError('Empty alternative in group');
+          throw new MaskError('Empty alternative in group');
+        }
         alternatives.push(current);
         i += 2;
         return { type: 'group', alternatives };
@@ -192,6 +208,7 @@ function parseFragment(fragment) {
 function parseQuantifier(fragment, startIndex) {
   const end = fragment.indexOf('}', startIndex);
   if (end === -1) {
+    logError('Unclosed quantifier');
     throw new MaskError('Unclosed quantifier');
   }
 
@@ -239,176 +256,170 @@ function makeSymbolNode(ch) {
 }
 
 function formatValue(parsed, rawValue) {
-  const cleaned = removeSeparators(rawValue, parsed.separators);
-  const consumption = matchInput(cleaned, parsed.fragments);
+  const input = rawValue == null ? '' : String(rawValue);
+  const fragmentsOut = [];
+  const fragmentsRaw = [];
+  const separators = parsed.separators;
+  const sepList = separators.filter(Boolean).slice().sort((a, b) => b.length - a.length);
+  let pos = 0;
 
-  if (!consumption) {
-    logError('Input does not satisfy the mask');
-    throw new MaskError('Input does not satisfy the mask');
+  for (let i = 0; i < parsed.fragments.length; i += 1) {
+    const fragmentNodes = parsed.fragments[i];
+    const result = consumeNodes(fragmentNodes, input, pos, sepList);
+    fragmentsOut.push(result.out);
+    fragmentsRaw.push(result.raw);
+    pos = result.pos;
+
+    if (!result.satisfied) {
+      break;
+    }
   }
 
-  return insertSeparators(cleaned, consumption, parsed.separators);
+  return {
+    raw: fragmentsRaw.join(''),
+    masked: joinWithSeparators(fragmentsOut, separators),
+  };
 }
 
-function removeSeparators(value, separators) {
-  return separators.reduce((acc, sep) => {
-    if (!sep) return acc;
-    return acc.split(sep).join('');
-  }, value);
+function consumeNodes(nodes, input, startPos, separators, tailNodes) {
+  let out = '';
+  let raw = '';
+  let pos = startPos;
+  let satisfied = true;
+
+  for (let i = 0; i < nodes.length; i += 1) {
+    const node = nodes[i];
+    const remaining = nodes.slice(i + 1);
+    const lookahead = tailNodes && tailNodes.length ? remaining.concat(tailNodes) : remaining;
+    const result = consumeNode(node, input, pos, separators, lookahead);
+    out += result.out;
+    raw += result.raw;
+    pos = result.pos;
+    if (!result.satisfied) {
+      satisfied = false;
+      break;
+    }
+  }
+
+  return {
+    out,
+    raw,
+    pos,
+    satisfied,
+    advanced: pos - startPos,
+  };
 }
 
-function insertSeparators(cleaned, consumption, separators) {
+function consumeNode(node, input, startPos, separators, remainingNodes) {
+  if (node.type === 'symbol') {
+    return consumeSymbol(node, input, startPos, separators, remainingNodes);
+  }
+
+  if (node.type === 'group') {
+    return consumeGroup(node, input, startPos, separators, remainingNodes);
+  }
+
+  return { out: '', raw: '', pos: startPos, satisfied: false, advanced: 0 };
+}
+
+function consumeSymbol(node, input, startPos, separators, remainingNodes) {
+  let out = '';
+  let raw = '';
+  let pos = startPos;
+  let count = 0;
+
+  while (pos < input.length && count < node.max) {
+    const sepLen = separatorLengthAt(input, pos, separators);
+    if (sepLen > 0) {
+      pos += sepLen;
+      continue;
+    }
+
+    const ch = input[pos];
+    if (matchesNode(node, ch)) {
+      out += ch;
+      raw += ch;
+      count += 1;
+    } else if (count >= node.min && canStartWithChar(remainingNodes, ch)) {
+      break;
+    }
+    pos += 1;
+  }
+
+  return {
+    out,
+    raw,
+    pos,
+    satisfied: count >= node.min,
+    advanced: pos - startPos,
+  };
+}
+
+function consumeGroup(node, input, startPos, separators, tailNodes) {
+  let best = { out: '', raw: '', pos: startPos, satisfied: false, advanced: 0 };
+
+  for (const alt of node.alternatives) {
+    const result = consumeNodes(alt, input, startPos, separators, tailNodes);
+    const better =
+      result.raw.length > best.raw.length ||
+      (result.raw.length === best.raw.length && result.advanced < best.advanced) ||
+      (result.raw.length === best.raw.length &&
+        result.advanced === best.advanced &&
+        result.satisfied &&
+        !best.satisfied);
+
+    if (better) {
+      best = result;
+    }
+  }
+
+  return best;
+}
+
+function canStartWithChar(nodes, ch) {
+  if (!nodes || nodes.length === 0) return false;
+  const first = nodes[0];
+
+  if (first.type === 'symbol') {
+    return matchesNode(first, ch);
+  }
+
+  if (first.type === 'group') {
+    for (const alt of first.alternatives) {
+      if (canStartWithChar(alt, ch)) return true;
+    }
+    return false;
+  }
+
+  return false;
+}
+
+function separatorLengthAt(input, pos, separators) {
+  for (let i = 0; i < separators.length; i += 1) {
+    const sep = separators[i];
+    if (!sep) continue;
+    if (input.startsWith(sep, pos)) return sep.length;
+  }
+  return 0;
+}
+
+function joinWithSeparators(fragmentOutputs, separators) {
   let output = '';
-  let offset = 0;
 
-  for (let i = 0; i < consumption.length; i += 1) {
-    const take = consumption[i] || 0;
-    output += cleaned.slice(offset, offset + take);
-    offset += take;
+  for (let i = 0; i < fragmentOutputs.length; i += 1) {
+    const part = fragmentOutputs[i];
+    if (!part) break;
+    output += part;
 
-    if (i < separators.length && offset < cleaned.length) {
-      output += separators[i];
+    if (i < separators.length) {
+      const nextPart = fragmentOutputs[i + 1];
+      if (nextPart) {
+        output += separators[i];
+      }
     }
   }
 
   return output;
-}
-
-function matchInput(cleaned, fragments) {
-  const path = new Array(fragments.length).fill(0);
-
-  function matchFragment(fragmentIdx, nodeIdx, pos, consumed) {
-    if (pos === cleaned.length) {
-      const finalPath = path.slice();
-      if (fragmentIdx < finalPath.length) {
-        finalPath[fragmentIdx] = consumed;
-      }
-      return finalPath;
-    }
-
-    if (fragmentIdx >= fragments.length) {
-      return null;
-    }
-
-    const nodes = fragments[fragmentIdx];
-
-    if (nodeIdx >= nodes.length) {
-      path[fragmentIdx] = consumed;
-      return matchFragment(fragmentIdx + 1, 0, pos, 0);
-    }
-
-    const node = nodes[nodeIdx];
-
-    if (node.type === 'symbol') {
-      const available = cleaned.length - pos;
-      if (available <= 0) {
-        return null;
-      }
-
-      const maxRepeat = Math.min(node.max, available);
-      const startRepeat = available < node.min ? 1 : node.min;
-
-      for (let count = startRepeat; count <= maxRepeat; count += 1) {
-        let ok = true;
-        for (let k = 0; k < count; k += 1) {
-          if (!matchesNode(node, cleaned[pos + k])) {
-            ok = false;
-            break;
-          }
-        }
-
-        if (!ok) continue;
-
-        const result = matchFragment(fragmentIdx, nodeIdx + 1, pos + count, consumed + count);
-        if (result) return result;
-      }
-
-      return null;
-    }
-
-    if (node.type === 'group') {
-      for (const alt of node.alternatives) {
-        const result = matchGroupNodes(
-          alt,
-          0,
-          pos,
-          consumed,
-          pos,
-          (nextPos, nextConsumed) => matchFragment(fragmentIdx, nodeIdx + 1, nextPos, nextConsumed)
-        );
-        if (result) return result;
-      }
-
-      return null;
-    }
-
-    return null;
-  }
-
-  function matchGroupNodes(nodes, idx, pos, consumedForFragment, startPos, onComplete) {
-    if (pos === cleaned.length) {
-      const added = pos - startPos;
-      return onComplete(pos, consumedForFragment + added);
-    }
-
-    if (idx >= nodes.length) {
-      const added = pos - startPos;
-      return onComplete(pos, consumedForFragment + added);
-    }
-
-    const node = nodes[idx];
-
-    if (node.type === 'symbol') {
-      const available = cleaned.length - pos;
-      if (available <= 0) {
-        return null;
-      }
-
-      const maxRepeat = Math.min(node.max, available);
-      const startRepeat = available < node.min ? 1 : node.min;
-
-      for (let count = startRepeat; count <= maxRepeat; count += 1) {
-        let ok = true;
-        for (let k = 0; k < count; k += 1) {
-          if (!matchesNode(node, cleaned[pos + k])) {
-            ok = false;
-            break;
-          }
-        }
-        if (!ok) continue;
-
-        const result = matchGroupNodes(
-          nodes,
-          idx + 1,
-          pos + count,
-          consumedForFragment + count,
-          startPos,
-          onComplete
-        );
-        if (result) return result;
-      }
-
-      return null;
-    }
-
-    if (node.type === 'group') {
-      for (const alt of node.alternatives) {
-        const result = matchGroupNodes(
-          alt,
-          0,
-          pos,
-          consumedForFragment,
-          pos,
-          (nextPos, nextConsumed) => matchGroupNodes(nodes, idx + 1, nextPos, nextConsumed, startPos, onComplete)
-        );
-        if (result) return result;
-      }
-    }
-
-    return null;
-  }
-
-  return matchFragment(0, 0, 0, 0);
 }
 
 function matchesNode(node, ch) {
@@ -429,7 +440,6 @@ function logError(message) {
   }
 }
 
-// Expose Mask globally for the demo page or as a module for testing.
 if (typeof window !== 'undefined') {
   window.Mask = Mask;
 }
@@ -437,5 +447,3 @@ if (typeof window !== 'undefined') {
 if (typeof module !== 'undefined') {
   module.exports = { Mask, MaskError };
 }
-
-

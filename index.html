@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="ru">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -8,13 +8,13 @@
 </head>
 <body>
     <div class="card">
-        <h1>Input mask playground</h1>
-        <p>Введите данные по шаблонам, маска автоматически отформатирует ввод и вставит разделители.</p>
+        <h1>Тест масок</h1>
+        <p>Mask.create(pattern) Тест паттернов.</p>
+
         <div class="grid">
             <div>
-                
                 <label for="holder">Holder</label>
-                <input id="holder" type="text" placeholder="Иван Иванов">
+                <input id="holder" type="text" placeholder="ANNA M.">
                 <div class="hint">[[A{+}|A{+}[[-| ]]A{+}|A.]]</div>
             </div>
             <div>
@@ -24,7 +24,7 @@
             </div>
             <div>
                 <label for="date">Date</label>
-                <input id="date" type="text" inputmode="numeric" placeholder="ДД.ММ.ГГГГ">
+                <input id="date" type="text" inputmode="numeric" placeholder="01.01.2026">
                 <div class="hint">00:.:00:.:0000</div>
             </div>
             <div>
@@ -40,7 +40,7 @@
         </div>
     </div>
 
-    <script src="script.js"></script>
+    <script src="./script.js"></script>
     <script>
         const patterns = {
             holder: '[[A{+}|A{+}[[-| ]]A{+}|A.]]',
@@ -50,54 +50,15 @@
             name: '[[A{+}|A{+}-A{+}]]',
         };
 
-
-
         function bindInput(id, pattern) {
             const input = document.getElementById(id);
             if (!input) return;
 
             const formatter = Mask.create(pattern);
-            const { separators } = splitBySeparators(pattern);
-            let lastValid = '';
 
             input.addEventListener('input', () => {
-                const cursor = input.selectionStart || 0;
-                const rawValue = input.value;
-                const dataBeforeCursor = removeSeparators(rawValue.slice(0, cursor), separators).length;
-
-                try {
-                    const formatted = formatter.format(rawValue);
-                    input.value = formatted;
-                    const nextCursor = findCursorPosition(formatted, separators, dataBeforeCursor);
-                    input.setSelectionRange(nextCursor, nextCursor);
-                    lastValid = formatted;
-                } catch (err) {
-                    console.error(err);
-                    input.value = lastValid;
-                    input.setSelectionRange(lastValid.length, lastValid.length);
-                }
+                input.value = formatter.format(input.value);
             });
-        }
-
-        function findCursorPosition(formatted, separators, dataCount) {
-            let dataSeen = 0;
-            let i = 0;
-
-            while (i < formatted.length) {
-                const found = separators.find(sep => sep && formatted.startsWith(sep, i));
-                if (found) {
-                    i += found.length;
-                    continue;
-                }
-
-                if (dataSeen === dataCount) {
-                    return i;
-                }
-                dataSeen += 1;
-                i += 1;
-            }
-
-            return formatted.length;
         }
 
         bindInput('holder', patterns.holder);
@@ -106,6 +67,5 @@
         bindInput('cvv', patterns.cvv);
         bindInput('name', patterns.name);
     </script>
-
 </body>
 </html>
