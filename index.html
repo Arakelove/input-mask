@@ -14,8 +14,8 @@
         <div class="grid">
             <div>
                 <label for="holder">Holder</label>
-                <input id="holder" type="text" placeholder="ANNA M.">
-                <div class="hint">[[A{+}|A{+}[[-| ]]A{+}|A.]]</div>
+                <input id="holder" type="text" placeholder="Anna Maria Garcia">
+                <div class="hint">[[A{+}|A.|A`A{+}|A{+}-A{+}|A{+}-A{+}.]]: :[[A{+}|A.|A`A{+}|A{+}-A{+}|A{+}-A{+}.]]: :[[A{+}|A.|A`A{+}|A{+}-A{+}|A{+}-A{+}.]]</div>
             </div>
             <div>
                 <label for="number">Card number</label>
@@ -40,10 +40,12 @@
         </div>
     </div>
 
-    <script src="./script.js"></script>
+    <script src="./dist/script.js"></script>
     <script>
+        const slice = '[[A{+}|A.|A`A{+}|A{+}-A{+}|A{+}-A{+}.]]';
+
         const patterns = {
-            holder: '[[A{+}|A{+}[[-| ]]A{+}|A.]]',
+            holder: `${slice}: :${slice}: :${slice}`,
             number: '0000: :0000: :0000: :0000',
             date: '00:.:00:.:0000',
             cvv: '[[000|0000]]',
