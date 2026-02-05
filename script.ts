@@ -35,14 +35,17 @@ type ConsumeResult = {
   advanced: number;
 };
 
+// буква или нет
+const LETTER_RE = /[A-Za-z\u0400-\u04FF]/;
+const DIGIT_RE = /\d/;
+
 const Mask = {
   create(pattern: string) {
     const parsed = parseMask(pattern);
 
     return {
       format(value: unknown): string {
-        const source = value == null ? '' : String(value);
-        return formatValue(parsed, source).masked;
+        return formatValue(parsed, value).masked;
       },
     };
   },
@@ -50,7 +53,7 @@ const Mask = {
 
 function parseMask(pattern: string): ParsedMask {
   if (typeof pattern !== 'string' || pattern.length === 0) {
-    throw new MaskError('Pattern must be a non-empty string');
+    fail('Pattern must be a non-empty string');
   }
 
   const { fragments: rawFragments, separators } = splitBySeparators(pattern);
@@ -78,8 +81,7 @@ function splitBySeparators(pattern: string): { fragments: string[]; separators: 
 
     if (ch === ']' && next === ']') {
       if (depth === 0) {
-        logError('Unmatched closing group "]]"');
-        throw new MaskError('Unmatched closing group "]]"');
+        fail('Unmatched closing group "]]"');
       }
       depth -= 1;
       current += ']]';
@@ -90,13 +92,11 @@ function splitBySeparators(pattern: string): { fragments: string[]; separators: 
     if (ch === ':' && depth === 0) {
       const end = pattern.indexOf(':', i + 1);
       if (end === -1) {
-        logError('Separator must be closed with ":"');
-        throw new MaskError('Separator must be closed with ":"');
+        fail('Separator must be closed with ":"');
       }
       const sep = pattern.slice(i + 1, end);
       if (current.length === 0) {
-        logError('Empty fragment before separator');
-        throw new MaskError('Empty fragment before separator');
+        fail('Empty fragment before separator');
       }
       fragments.push(current);
       separators.push(sep);
@@ -106,21 +106,18 @@ function splitBySeparators(pattern: string): { fragments: string[]; separators: 
     }
 
     if (ch === ':' && depth > 0) {
-      logError('Separators are not allowed inside groups');
-      throw new MaskError('Separators are not allowed inside groups');
+      fail('Separators are not allowed inside groups');
     }
 
     current += ch;
   }
 
   if (depth !== 0) {
-    logError('Unclosed group "[["');
-    throw new MaskError('Unclosed group "[["');
+    fail('Unclosed group "[["');
   }
 
   if (current.length === 0) {
-    logError('Empty fragment at end of pattern');
-    throw new MaskError('Empty fragment at end of pattern');
+    fail('Empty fragment at end of pattern');
   }
 
   fragments.push(current);
@@ -140,21 +137,18 @@ function parseFragment(fragment: string): MaskNode[] {
       i += 2;
       const groupNode = parseGroup();
       if (fragment[i] === '{') {
-        logError('Quantifiers cannot be applied to groups');
-        throw new MaskError('Quantifiers cannot be applied to groups');
+        fail('Quantifiers cannot be applied to groups');
       }
       nodes.push(groupNode);
       continue;
     }
 
     if (ch === ']' || (ch === ']' && next === ']')) {
-      logError('Unexpected closing bracket');
-      throw new MaskError('Unexpected closing bracket');
+      fail('Unexpected closing bracket');
     }
 
     if (ch === '|') {
-      logError('Unexpected "|" outside a group');
-      throw new MaskError('Unexpected "|" outside a group');
+      fail('Unexpected "|" outside a group');
     }
 
     const node = makeSymbolNode(ch);
@@ -181,8 +175,7 @@ function parseFragment(fragment: string): MaskNode[] {
       const lookahead = fragment[i + 1];
 
       if (currentChar === ':' && lookahead !== undefined) {
-        logError('Separators are not allowed inside groups');
-        throw new MaskError('Separators are not allowed inside groups');
+        fail('Separators are not allowed inside groups');
       }
 
       if (currentChar === '[' && lookahead === '[') {
@@ -193,8 +186,7 @@ function parseFragment(fragment: string): MaskNode[] {
 
       if (currentChar === '|' && i < fragment.length) {
         if (current.length === 0) {
-          logError('Empty alternative in group');
-          throw new MaskError('Empty alternative in group');
+          fail('Empty alternative in group');
         }
         alternatives.push(current);
         current = [];
@@ -204,8 +196,7 @@ function parseFragment(fragment: string): MaskNode[] {
 
       if (currentChar === ']' && lookahead === ']') {
         if (current.length === 0) {
-          logError('Empty alternative in group');
-          throw new MaskError('Empty alternative in group');
+          fail('Empty alternative in group');
         }
         alternatives.push(current);
         i += 2;
@@ -213,8 +204,7 @@ function parseFragment(fragment: string): MaskNode[] {
       }
 
       if (currentChar === ']' || currentChar === '{' || currentChar === '}') {
-        logError(`Unexpected symbol "${currentChar}" in group`);
-        throw new MaskError(`Unexpected symbol "${currentChar}" in group`);
+        fail(`Unexpected symbol "${currentChar}" in group`);
       }
 
       const node = makeSymbolNode(currentChar);
@@ -230,23 +220,20 @@ function parseFragment(fragment: string): MaskNode[] {
       current.push(node);
     }
 
-    logError('Unclosed group "[["');
-    throw new MaskError('Unclosed group "[["');
+    fail('Unclosed group "[["');
   }
 }
 
 function parseQuantifier(fragment: string, startIndex: number): { min: number; max: number; nextIndex: number } {
   const end = fragment.indexOf('}', startIndex);
   if (end === -1) {
-    logError('Unclosed quantifier');
-    throw new MaskError('Unclosed quantifier');
+    fail('Unclosed quantifier');
   }
 
   const body = fragment.slice(startIndex, end);
 
   if (body.length === 0) {
-    logError('Empty quantifier "{}" is invalid');
-    throw new MaskError('Empty quantifier "{}" is invalid');
+    fail('Empty quantifier "{}" is invalid');
   }
 
   if (body === '+') {
@@ -254,8 +241,7 @@ function parseQuantifier(fragment: string, startIndex: number): { min: number; m
   }
 
   if (!/^[1-9]\d*$/.test(body)) {
-    logError(`Invalid quantifier "${body}"`);
-    throw new MaskError(`Invalid quantifier "${body}"`);
+    fail(`Invalid quantifier "${body}"`);
   }
 
   const count = Number(body);
@@ -264,13 +250,11 @@ function parseQuantifier(fragment: string, startIndex: number): { min: number; m
 
 function makeSymbolNode(ch: string): SymbolNode {
   if (ch === ':' || ch === '{' || ch === '}' || ch === '|' || ch === ']') {
-    logError(`Unexpected symbol "${ch}"`);
-    throw new MaskError(`Unexpected symbol "${ch}"`);
+    fail(`Unexpected symbol "${ch}"`);
   }
 
   if (ch === '[') {
-    logError('Unexpected "[" without pair');
-    throw new MaskError('Unexpected "[" without pair');
+    fail('Unexpected "[" without pair');
   }
 
   const isLetter = ch === 'A';
@@ -320,7 +304,7 @@ function formatValue(parsed: ParsedMask, rawValue: unknown): { raw: string; mask
 
   const fragmentsOut: string[] = [];
   const fragmentsRaw: string[] = [];
-  const sepList = separators.filter(Boolean).slice().sort((a, b) => b.length - a.length);
+  const sepList = separators.filter(Boolean).sort((a, b) => b.length - a.length);
   let pos = 0;
 
   for (let i = 0; i < parsed.fragments.length; i += 1) {
@@ -507,8 +491,7 @@ function canStartWithChar(nodes: MaskNode[] | undefined, ch: string): boolean {
 }
 
 function separatorLengthAt(input: string, pos: number, separators: string[]): number {
-  for (let i = 0; i < separators.length; i += 1) {
-    const sep = separators[i];
+  for (const sep of separators) {
     if (!sep) continue;
     if (input.startsWith(sep, pos)) return sep.length;
   }
@@ -536,11 +519,11 @@ function joinWithSeparators(fragmentOutputs: string[], separators: string[]): st
 
 function matchesNode(node: SymbolNode, ch: string): boolean {
   if (node.kind === 'A') {
-    return /[A-Za-z\u0400-\u04FF]/.test(ch);
+    return LETTER_RE.test(ch);
   }
 
   if (node.kind === '0') {
-    return /\d/.test(ch);
+    return DIGIT_RE.test(ch);
   }
 
   return ch === node.value;
@@ -550,6 +533,11 @@ function logError(message: string): void {
   if (typeof console !== 'undefined' && console.error) {
     console.error(`[Mask] ${message}`);
   }
+}
+
+function fail(message: string): never {
+  logError(message);
+  throw new MaskError(message);
 }
 
 declare const module: { exports?: unknown } | undefined;

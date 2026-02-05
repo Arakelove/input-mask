@@ -5,20 +5,22 @@ class MaskError extends Error {
         this.name = 'MaskError';
     }
 }
+// буква или нет
+const LETTER_RE = /[A-Za-z\u0400-\u04FF]/;
+const DIGIT_RE = /\d/;
 const Mask = {
     create(pattern) {
         const parsed = parseMask(pattern);
         return {
             format(value) {
-                const source = value == null ? '' : String(value);
-                return formatValue(parsed, source).masked;
+                return formatValue(parsed, value).masked;
             },
         };
     },
 };
 function parseMask(pattern) {
     if (typeof pattern !== 'string' || pattern.length === 0) {
-        throw new MaskError('Pattern must be a non-empty string');
+        fail('Pattern must be a non-empty string');
     }
     const { fragments: rawFragments, separators } = splitBySeparators(pattern);
     const fragments = rawFragments.map(parseFragment);
@@ -40,8 +42,7 @@ function splitBySeparators(pattern) {
         }
         if (ch === ']' && next === ']') {
             if (depth === 0) {
-                logError('Unmatched closing group "]]"');
-                throw new MaskError('Unmatched closing group "]]"');
+                fail('Unmatched closing group "]]"');
             }
             depth -= 1;
             current += ']]';
@@ -51,13 +52,11 @@ function splitBySeparators(pattern) {
         if (ch === ':' && depth === 0) {
             const end = pattern.indexOf(':', i + 1);
             if (end === -1) {
-                logError('Separator must be closed with ":"');
-                throw new MaskError('Separator must be closed with ":"');
+                fail('Separator must be closed with ":"');
             }
             const sep = pattern.slice(i + 1, end);
             if (current.length === 0) {
-                logError('Empty fragment before separator');
-                throw new MaskError('Empty fragment before separator');
+                fail('Empty fragment before separator');
             }
             fragments.push(current);
             separators.push(sep);
@@ -66,18 +65,15 @@ function splitBySeparators(pattern) {
             continue;
         }
         if (ch === ':' && depth > 0) {
-            logError('Separators are not allowed inside groups');
-            throw new MaskError('Separators are not allowed inside groups');
+            fail('Separators are not allowed inside groups');
         }
         current += ch;
     }
     if (depth !== 0) {
-        logError('Unclosed group "[["');
-        throw new MaskError('Unclosed group "[["');
+        fail('Unclosed group "[["');
     }
     if (current.length === 0) {
-        logError('Empty fragment at end of pattern');
-        throw new MaskError('Empty fragment at end of pattern');
+        fail('Empty fragment at end of pattern');
     }
     fragments.push(current);
     return { fragments, separators };
@@ -92,19 +88,16 @@ function parseFragment(fragment) {
             i += 2;
             const groupNode = parseGroup();
             if (fragment[i] === '{') {
-                logError('Quantifiers cannot be applied to groups');
-                throw new MaskError('Quantifiers cannot be applied to groups');
+                fail('Quantifiers cannot be applied to groups');
             }
             nodes.push(groupNode);
             continue;
         }
         if (ch === ']' || (ch === ']' && next === ']')) {
-            logError('Unexpected closing bracket');
-            throw new MaskError('Unexpected closing bracket');
+            fail('Unexpected closing bracket');
         }
         if (ch === '|') {
-            logError('Unexpected "|" outside a group');
-            throw new MaskError('Unexpected "|" outside a group');
+            fail('Unexpected "|" outside a group');
         }
         const node = makeSymbolNode(ch);
         i += 1;
@@ -124,8 +117,7 @@ function parseFragment(fragment) {
             const currentChar = fragment[i];
             const lookahead = fragment[i + 1];
             if (currentChar === ':' && lookahead !== undefined) {
-                logError('Separators are not allowed inside groups');
-                throw new MaskError('Separators are not allowed inside groups');
+                fail('Separators are not allowed inside groups');
             }
             if (currentChar === '[' && lookahead === '[') {
                 i += 2;
@@ -134,8 +126,7 @@ function parseFragment(fragment) {
             }
             if (currentChar === '|' && i < fragment.length) {
                 if (current.length === 0) {
-                    logError('Empty alternative in group');
-                    throw new MaskError('Empty alternative in group');
+                    fail('Empty alternative in group');
                 }
                 alternatives.push(current);
                 current = [];
@@ -144,16 +135,14 @@ function parseFragment(fragment) {
             }
             if (currentChar === ']' && lookahead === ']') {
                 if (current.length === 0) {
-                    logError('Empty alternative in group');
-                    throw new MaskError('Empty alternative in group');
+                    fail('Empty alternative in group');
                 }
                 alternatives.push(current);
                 i += 2;
                 return { type: 'group', alternatives };
             }
             if (currentChar === ']' || currentChar === '{' || currentChar === '}') {
-                logError(`Unexpected symbol "${currentChar}" in group`);
-                throw new MaskError(`Unexpected symbol "${currentChar}" in group`);
+                fail(`Unexpected symbol "${currentChar}" in group`);
             }
             const node = makeSymbolNode(currentChar);
             i += 1;
@@ -165,39 +154,33 @@ function parseFragment(fragment) {
             }
             current.push(node);
         }
-        logError('Unclosed group "[["');
-        throw new MaskError('Unclosed group "[["');
+        fail('Unclosed group "[["');
     }
 }
 function parseQuantifier(fragment, startIndex) {
     const end = fragment.indexOf('}', startIndex);
     if (end === -1) {
-        logError('Unclosed quantifier');
-        throw new MaskError('Unclosed quantifier');
+        fail('Unclosed quantifier');
     }
     const body = fragment.slice(startIndex, end);
     if (body.length === 0) {
-        logError('Empty quantifier "{}" is invalid');
-        throw new MaskError('Empty quantifier "{}" is invalid');
+        fail('Empty quantifier "{}" is invalid');
     }
     if (body === '+') {
         return { min: 1, max: Infinity, nextIndex: end + 1 };
     }
     if (!/^[1-9]\d*$/.test(body)) {
-        logError(`Invalid quantifier "${body}"`);
-        throw new MaskError(`Invalid quantifier "${body}"`);
+        fail(`Invalid quantifier "${body}"`);
     }
     const count = Number(body);
     return { min: count, max: count, nextIndex: end + 1 };
 }
 function makeSymbolNode(ch) {
     if (ch === ':' || ch === '{' || ch === '}' || ch === '|' || ch === ']') {
-        logError(`Unexpected symbol "${ch}"`);
-        throw new MaskError(`Unexpected symbol "${ch}"`);
+        fail(`Unexpected symbol "${ch}"`);
     }
     if (ch === '[') {
-        logError('Unexpected "[" without pair');
-        throw new MaskError('Unexpected "[" without pair');
+        fail('Unexpected "[" without pair');
     }
     const isLetter = ch === 'A';
     const isDigit = ch === '0';
@@ -244,7 +227,7 @@ function formatValue(parsed, rawValue) {
     }
     const fragmentsOut = [];
     const fragmentsRaw = [];
-    const sepList = separators.filter(Boolean).slice().sort((a, b) => b.length - a.length);
+    const sepList = separators.filter(Boolean).sort((a, b) => b.length - a.length);
     let pos = 0;
     for (let i = 0; i < parsed.fragments.length; i += 1) {
         const fragmentNodes = parsed.fragments[i];
@@ -387,8 +370,7 @@ function canStartWithChar(nodes, ch) {
     return false;
 }
 function separatorLengthAt(input, pos, separators) {
-    for (let i = 0; i < separators.length; i += 1) {
-        const sep = separators[i];
+    for (const sep of separators) {
         if (!sep)
             continue;
         if (input.startsWith(sep, pos))
@@ -414,10 +396,10 @@ function joinWithSeparators(fragmentOutputs, separators) {
 }
 function matchesNode(node, ch) {
     if (node.kind === 'A') {
-        return /[A-Za-z\u0400-\u04FF]/.test(ch);
+        return LETTER_RE.test(ch);
     }
     if (node.kind === '0') {
-        return /\d/.test(ch);
+        return DIGIT_RE.test(ch);
     }
     return ch === node.value;
 }
@@ -425,6 +407,10 @@ function logError(message) {
     if (typeof console !== 'undefined' && console.error) {
         console.error(`[Mask] ${message}`);
     }
+}
+function fail(message) {
+    logError(message);
+    throw new MaskError(message);
 }
 if (typeof window !== 'undefined') {
     window.Mask = Mask;
